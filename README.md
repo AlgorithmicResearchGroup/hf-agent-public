@@ -53,17 +53,24 @@ python run_collab_long.py --prompts challenge_prompts.json --prompt 1
 
 ## Run on Hugging Face Jobs
 
-Build and publish a Docker image that contains this repo. For example:
+This repo includes a GitHub Actions workflow at `.github/workflows/publish.yaml` that builds and publishes the Docker image to GHCR on pushes to `main`/`master`, on version tags, and on manual dispatch.
+
+The published image path is:
 
 ```bash
-docker build -t your-registry/multiagent-hf:latest .
-docker push your-registry/multiagent-hf:latest
+ghcr.io/algorithmicresearchgroup/hf-agent-public:latest
+```
+
+You can still build locally if needed:
+
+```bash
+docker build -t ghcr.io/algorithmicresearchgroup/hf-agent-public:latest .
 ```
 
 Then point the launcher at that image:
 
 ```bash
-export HF_JOB_IMAGE=your-registry/multiagent-hf:latest
+export HF_JOB_IMAGE=ghcr.io/algorithmicresearchgroup/hf-agent-public:latest
 ```
 
 Launch the full orchestrator as one remote job:
