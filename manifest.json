@@ -1,0 +1,21 @@
+{
+    "defaultSettingsPack": "default",
+    "settingsPacks": {
+        "default": {
+            "description": "Default configuration (OpenAI)",
+            "model": "gpt-5.2",
+            "max_iterations": 100,
+            "provider": "openai",
+            "max_runtime_seconds": 600,
+            "max_tokens": 4096
+        },
+        "anthropic": {
+            "description": "Anthropic configuration",
+            "model": "claude-opus-4-6",
+            "max_iterations": 100,
+            "provider": "anthropic",
+            "max_runtime_seconds": 600,
+            "max_tokens": 4096
+        }
+    }
+}

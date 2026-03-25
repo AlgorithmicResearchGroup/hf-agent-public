@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Single A100 Coding Fine-Tune",
+    "prompt": "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A on Hugging Face. Which model should I use, what fine-tuning method fits the hardware, and what should the training plan look like?"
+  },
+  {
+    "name": "Budget Multilingual Retrieval",
+    "prompt": "I have 2x L4 GPUs and need a multilingual embedding model for retrieval. Which Hugging Face models should I shortlist, what tradeoffs matter, and how would you fine-tune the best option?"
+  },
+  {
+    "name": "Document VQA Model Choice",
+    "prompt": "For a document VQA job with a limited training budget, which open model on Hugging Face should I fine-tune and why? Include alternatives, hardware fit, and usage examples."
+  },
+  {
+    "name": "24GB Consumer GPU Instruction Tune",
+    "prompt": "I have a single 24GB consumer GPU and want to instruction-tune a small model for customer support. What Hugging Face model should I start from, and should I use LoRA, QLoRA, or full fine-tuning?"
+  },
+  {
+    "name": "Vision-Language Shortlist",
+    "prompt": "I need a strong open vision-language model on Hugging Face for OCR-heavy workflows. Which models should I evaluate first, what hardware do they need, and how would you adapt them?"
+  },
+  {
+    "name": "Long-Context Fine-Tune Planning",
+    "prompt": "I want to fine-tune a long-context model on Hugging Face for legal-document summarization. Given limited compute, which model family and fine-tuning approach should I use?"
+  }
+]

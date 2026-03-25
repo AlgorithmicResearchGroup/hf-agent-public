@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Agent</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Simple Agent</h1>
+        <div class="input-area">
+            <textarea id="prompt" rows="3" placeholder="Enter your prompt..."></textarea>
+            <button id="submit">Run</button>
+            <button id="stop" disabled>Stop</button>
+        </div>
+        <pre id="output"></pre>
+    </div>
+
+    <script>
+        const promptEl = document.getElementById("prompt");
+        const submitEl = document.getElementById("submit");
+        const stopEl = document.getElementById("stop");
+        const outputEl = document.getElementById("output");
+
+        let reader = null;
+
+        submitEl.addEventListener("click", run);
+        stopEl.addEventListener("click", stop);
+        promptEl.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run();
+        });
+
+        function setRunning(running) {
+            submitEl.disabled = running;
+            promptEl.disabled = running;
+            stopEl.disabled = !running;
+        }
+
+        async function stop() {
+            await fetch("/stop", {method: "POST"});
+            if (reader) reader.cancel();
+        }
+
+        async function run() {
+            const prompt = promptEl.value.trim();
+            if (!prompt) return;
+
+            outputEl.textContent = "";
+            setRunning(true);
+
+            const response = await fetch("/run", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({prompt}),
+            });
+
+            reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split("\n");
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (line.startsWith("data: ")) {
+                        outputEl.textContent += line.slice(6) + "\n";
+                        outputEl.scrollTop = outputEl.scrollHeight;
+                    }
+                }
+            }
+
+            reader = null;
+            setRunning(false);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+{
+  "status": "pass",
+  "task": "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A. What model on Hugging Face should I use?",
+  "workspace": "/tmp/output",
+  "agents": [
+    {
+      "id": "landscape",
+      "role": "Hugging Face landscape + coding-model scouting"
+    },
+    {
+      "id": "training",
+      "role": "Hardware + fine-tuning strategy on 1x A100 80GB"
+    },
+    {
+      "id": "implementation",
+      "role": "Practical implementation (Transformers/TRL/PEFT) snippets for repo Q&A fine-tune + inference"
+    },
+    {
+      "id": "synthesis",
+      "role": "Synthesize recommendation into final Markdown report"
+    }
+  ],
+  "qa_waves_run": 1,
+  "qa_passed": true,
+  "files": [
+    {
+      "path": "code_examples.md",
+      "size_bytes": 14983
+    },
+    {
+      "path": "huggingface_ecosystem.md",
+      "size_bytes": 7081
+    },
+    {
+      "path": "qa_report.json",
+      "size_bytes": 756
+    },
+    {
+      "path": "report.md",
+      "size_bytes": 14082
+    },
+    {
+      "path": "training_plan.md",
+      "size_bytes": 11005
+    },
+    {
+      "path": "snippets/infer_rag.py",
+      "size_bytes": 3901
+    },
+    {
+      "path": "snippets/train_lora.py",
+      "size_bytes": 5524
+    }
+  ],
+  "qa_report": {
+    "status": "pass",
+    "summary": "QA review found a substantive final report (report.md) with an executive summary, a concrete default recommendation (Qwen/Qwen2.5-Coder-7B-Instruct) plus ranked alternatives, explicit hardware/fit guidance for 1x A100 80GB, Hugging Face library context, technique discussion (LoRA/QLoRA + TRL SFTTrainer + RAG), and a references section with relevant URLs. The report includes embedded code and provides a line-by-line explanation. Standalone snippet files in snippets/ compile successfully.",
+    "errors": [],
+    "files_tested": [
+      "report.md",
+      "snippets/infer_rag.py",
+      "snippets/train_lora.py"
+    ],
+    "commands_run": [
+      {
+        "cmd": "python -m py_compile snippets/*.py",
+        "exit_code": 0
+      }
+    ]
+  }
+}
