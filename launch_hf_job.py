@@ -4,11 +4,14 @@ Launch the full multi-agent orchestrator as a single Hugging Face Job.
 """
 
 import argparse
+import json
 import os
 import sys
 import time
+from types import SimpleNamespace
 from typing import Dict, Optional
 
+import requests
 from huggingface_hub import HfApi, run_job
 
 
@@ -35,6 +38,7 @@ DEFAULT_ENV_NAMES = [
 ]
 
 DEFAULT_IMAGE_ENV = "HF_JOB_IMAGE"
+HF_ENDPOINT = "https://huggingface.co"
 
 
 def collect_existing_env(names) -> Dict[str, str]:
@@ -54,15 +58,146 @@ def build_remote_command(query: str) -> list[str]:
     return ["python", "run_collab_long.py", query]
 
 
+def get_hf_token() -> Optional[str]:
+    for name in ("HUGGINGFACE_HUB_TOKEN", "HF_TOKEN", "HF_HUB_TOKEN"):
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
+
+
+def parse_timeout_seconds(timeout: str) -> int:
+    factors = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    if timeout and timeout[-1] in factors:
+        return int(float(timeout[:-1]) * factors[timeout[-1]])
+    return int(float(timeout))
+
+
+def _build_rest_headers(token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+
+def _resolve_namespace_via_rest(token: str, namespace: Optional[str]) -> str:
+    if namespace:
+        return namespace
+    response = requests.get(f"{HF_ENDPOINT}/api/whoami-v2", headers=_build_rest_headers(token), timeout=30)
+    response.raise_for_status()
+    return response.json()["name"]
+
+
+def _job_web_url(job_id: str) -> str:
+    return f"{HF_ENDPOINT}/jobs/{job_id}"
+
+
+def should_fallback_to_rest(exc: Exception) -> bool:
+    message = str(exc)
+    return isinstance(exc, TypeError) and "JobOwner" in message
+
+
+def submit_job_via_rest(
+    *,
+    image: str,
+    command: list[str],
+    env: Dict[str, str],
+    secrets: Optional[Dict[str, str]],
+    flavor: str,
+    timeout: str,
+    namespace: Optional[str],
+):
+    token = get_hf_token()
+    if not token:
+        raise RuntimeError("A Hugging Face token is required for REST fallback. Set HF_TOKEN or HUGGINGFACE_HUB_TOKEN.")
+
+    resolved_namespace = _resolve_namespace_via_rest(token, namespace)
+    payload = {
+        "command": command,
+        "arguments": [],
+        "environment": env,
+        "flavor": flavor,
+        "timeoutSeconds": parse_timeout_seconds(timeout),
+        "dockerImage": image,
+    }
+    if secrets:
+        payload["secrets"] = secrets
+
+    response = requests.post(
+        f"{HF_ENDPOINT}/api/jobs/{resolved_namespace}",
+        headers=_build_rest_headers(token),
+        json=payload,
+        timeout=60,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return SimpleNamespace(
+        id=data["id"],
+        url=data.get("url") or _job_web_url(data["id"]),
+        flavor=data.get("flavor", flavor),
+        namespace=resolved_namespace,
+    )
+
+
+def inspect_job_via_rest(job_id: str, namespace: Optional[str]):
+    token = get_hf_token()
+    if not token:
+        raise RuntimeError("A Hugging Face token is required for REST fallback. Set HF_TOKEN or HUGGINGFACE_HUB_TOKEN.")
+
+    resolved_namespace = _resolve_namespace_via_rest(token, namespace)
+    response = requests.get(
+        f"{HF_ENDPOINT}/api/jobs/{resolved_namespace}/{job_id}",
+        headers=_build_rest_headers(token),
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return SimpleNamespace(
+        id=data["id"],
+        status=SimpleNamespace(stage=data["status"]["stage"]),
+        namespace=resolved_namespace,
+    )
+
+
+def fetch_job_logs_via_rest(job_id: str, namespace: Optional[str]):
+    token = get_hf_token()
+    if not token:
+        raise RuntimeError("A Hugging Face token is required for REST fallback. Set HF_TOKEN or HUGGINGFACE_HUB_TOKEN.")
+
+    resolved_namespace = _resolve_namespace_via_rest(token, namespace)
+    response = requests.get(
+        f"{HF_ENDPOINT}/api/jobs/{resolved_namespace}/{job_id}/logs",
+        headers=_build_rest_headers(token),
+        stream=True,
+        timeout=120,
+    )
+    response.raise_for_status()
+    for raw in response.iter_lines(chunk_size=1):
+        if not raw:
+            continue
+        line = raw.decode("utf-8", errors="replace")
+        if line.startswith("data: {"):
+            data = json.loads(line[len("data: ") :])
+            message = data.get("data", "")
+            if message and not message.startswith("===== Job started"):
+                yield message
+
+
 def wait_for_job(job_id: str, namespace: Optional[str], poll_interval: int) -> str:
-    api = HfApi()
     while True:
-        job = api.inspect_job(job_id=job_id, namespace=namespace)
+        try:
+            job = HfApi().inspect_job(job_id=job_id, namespace=namespace)
+            log_lines = lambda: HfApi().fetch_job_logs(job_id=job_id, namespace=namespace)
+        except Exception as exc:
+            if not should_fallback_to_rest(exc):
+                raise
+            job = inspect_job_via_rest(job_id, namespace)
+            log_lines = lambda: fetch_job_logs_via_rest(job_id, namespace)
         stage = str(job.status.stage)
         print(f"[HF JOB] {job.id} stage={stage}", flush=True)
         if stage in {"COMPLETED", "ERROR", "CANCELED", "DELETED"}:
             print("[HF JOB] Final logs:", flush=True)
-            for line in api.fetch_job_logs(job_id=job_id, namespace=namespace):
+            for line in log_lines():
                 print(line, end="" if line.endswith("\n") else "\n")
             return stage
         time.sleep(poll_interval)
@@ -94,15 +229,29 @@ def main():
     env = {"PYTHONUNBUFFERED": "1", **collect_existing_env(DEFAULT_ENV_NAMES)}
     secrets = collect_existing_env(DEFAULT_SECRET_NAMES)
 
-    job = run_job(
-        image=image,
-        command=build_remote_command(args.query),
-        env=env,
-        secrets=secrets or None,
-        flavor=args.flavor,
-        timeout=args.timeout,
-        namespace=args.namespace,
-    )
+    try:
+        job = run_job(
+            image=image,
+            command=build_remote_command(args.query),
+            env=env,
+            secrets=secrets or None,
+            flavor=args.flavor,
+            timeout=args.timeout,
+            namespace=args.namespace,
+        )
+    except Exception as exc:
+        if not should_fallback_to_rest(exc):
+            raise
+        print(f"[HF JOB] Client submission failed, falling back to raw REST call: {exc}", flush=True)
+        job = submit_job_via_rest(
+            image=image,
+            command=build_remote_command(args.query),
+            env=env,
+            secrets=secrets or None,
+            flavor=args.flavor,
+            timeout=args.timeout,
+            namespace=args.namespace,
+        )
 
     print(f"Job started: {job.id}")
     print(f"URL: {job.url}")
