@@ -1,4 +1,5 @@
 from launch_hf_job import (
+    build_job_environment,
     build_remote_command,
     get_hf_token,
     parse_timeout_seconds,
@@ -27,6 +28,17 @@ def test_build_remote_command_runs_orchestrator_from_image():
 
     assert command[:2] == ["python", "run_collab_long.py"]
     assert "What model on Hugging Face should I use?" in command[2]
+
+
+def test_build_job_environment_adds_report_bucket_and_prefix(monkeypatch):
+    monkeypatch.delenv("REPORT_BUCKET", raising=False)
+    monkeypatch.delenv("REPORT_PREFIX", raising=False)
+
+    env = build_job_environment("user/hf-agent", "runs/demo")
+
+    assert env["PYTHONUNBUFFERED"] == "1"
+    assert env["REPORT_BUCKET"] == "user/hf-agent"
+    assert env["REPORT_PREFIX"] == "runs/demo"
 
 
 def test_get_hf_token_prefers_hub_token(monkeypatch):

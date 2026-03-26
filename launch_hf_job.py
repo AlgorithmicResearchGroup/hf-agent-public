@@ -35,6 +35,8 @@ DEFAULT_ENV_NAMES = [
     "QA_ITERATIONS",
     "FIX_ITERATIONS",
     "FIX_RUNTIME_SECONDS",
+    "REPORT_BUCKET",
+    "REPORT_PREFIX",
 ]
 
 DEFAULT_IMAGE_ENV = "HF_JOB_IMAGE"
@@ -56,6 +58,15 @@ def resolve_job_image(cli_value: Optional[str]) -> Optional[str]:
 
 def build_remote_command(query: str) -> list[str]:
     return ["python", "run_collab_long.py", query]
+
+
+def build_job_environment(cli_report_bucket: Optional[str], cli_report_prefix: Optional[str]) -> Dict[str, str]:
+    env = {"PYTHONUNBUFFERED": "1", **collect_existing_env(DEFAULT_ENV_NAMES)}
+    if cli_report_bucket:
+        env["REPORT_BUCKET"] = cli_report_bucket
+    if cli_report_prefix:
+        env["REPORT_PREFIX"] = cli_report_prefix
+    return env
 
 
 def get_hf_token() -> Optional[str]:
@@ -213,6 +224,8 @@ def parse_args():
     parser.add_argument("--flavor", default="cpu-basic", help="Hugging Face Jobs hardware flavor")
     parser.add_argument("--timeout", default="2h", help="Maximum job duration")
     parser.add_argument("--namespace", help="Optional Hugging Face user or org namespace")
+    parser.add_argument("--report-bucket", help="Bucket to upload final artifacts to, for example username/hf-agent")
+    parser.add_argument("--report-prefix", help="Optional prefix inside the target bucket, for example runs/my-job")
     parser.add_argument("--wait", action="store_true", help="Wait for the remote job to finish")
     parser.add_argument("--poll-interval", type=int, default=15, help="Seconds between status polls when waiting")
     return parser.parse_args()
@@ -226,7 +239,7 @@ def main():
             f"Set --image or define {DEFAULT_IMAGE_ENV} to a prebuilt Docker image that contains this repo."
         )
 
-    env = {"PYTHONUNBUFFERED": "1", **collect_existing_env(DEFAULT_ENV_NAMES)}
+    env = build_job_environment(args.report_bucket, args.report_prefix)
     secrets = collect_existing_env(DEFAULT_SECRET_NAMES)
 
     try:

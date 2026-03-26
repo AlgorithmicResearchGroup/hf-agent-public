@@ -24,6 +24,7 @@ import time
 
 from dotenv import load_dotenv
 
+from artifact_publisher import build_artifacts_info, upload_workspace_to_bucket, write_artifacts_manifest
 from agent.utils import anthropic_to_openai
 from agent_protocol.broker import MessageBroker
 
@@ -649,6 +650,8 @@ def main():
     qa_iterations = int(os.environ.get("QA_ITERATIONS", "30"))
     fix_iterations = int(os.environ.get("FIX_ITERATIONS", "15"))
     fix_runtime = int(os.environ.get("FIX_RUNTIME_SECONDS", "120"))
+    report_bucket = os.environ.get("REPORT_BUCKET")
+    report_prefix = os.environ.get("REPORT_PREFIX")
 
     print("=" * 70)
     print("HUGGING FACE MODEL ADVISOR ORCHESTRATOR")
@@ -757,9 +760,39 @@ def main():
         else:
             summary["qa_report"] = None
 
+        artifacts_info = None
+        if report_bucket:
+            artifacts_info = build_artifacts_info(shared_dir, report_bucket, report_prefix)
+            artifacts_info["upload_status"] = "pending"
+            summary["artifacts"] = artifacts_info
+
         summary_path = os.path.join(shared_dir, "run_summary.json")
         with open(summary_path, "w") as handle:
             json.dump(summary, handle, indent=2)
+
+        upload_error = None
+        if report_bucket:
+            write_artifacts_manifest(shared_dir, artifacts_info, status="pending")
+            try:
+                artifacts_info = upload_workspace_to_bucket(shared_dir, report_bucket, report_prefix)
+                artifacts_info["upload_status"] = "uploaded"
+                summary["artifacts"] = artifacts_info
+                with open(summary_path, "w") as handle:
+                    json.dump(summary, handle, indent=2)
+                write_artifacts_manifest(shared_dir, artifacts_info, status="uploaded")
+                upload_workspace_to_bucket(shared_dir, report_bucket, report_prefix)
+                print("\n[ARTIFACTS] Uploaded run outputs")
+                print(f"[ARTIFACTS] Primary: {artifacts_info['primary_artifact']['remote_uri']}")
+                print(f"[ARTIFACTS] Bucket: {artifacts_info['bucket_url']}")
+            except Exception as exc:
+                upload_error = str(exc)
+                artifacts_info["upload_status"] = "failed"
+                artifacts_info["upload_error"] = upload_error
+                summary["artifacts"] = artifacts_info
+                with open(summary_path, "w") as handle:
+                    json.dump(summary, handle, indent=2)
+                write_artifacts_manifest(shared_dir, artifacts_info, status="failed", upload_error=upload_error)
+                print(f"\n[ARTIFACTS] Upload failed: {upload_error}")
 
         print("\n" + "=" * 70)
         print("ALL WAVES COMPLETE")
@@ -767,7 +800,7 @@ def main():
         print(f"QA result: {'PASSED' if qa_passed else 'FAILED'}")
         print(f"Run summary written to: {summary_path}")
         _print_workspace(shared_dir)
-        sys.exit(0 if qa_passed else 1)
+        sys.exit(0 if qa_passed and not upload_error else 1)
     finally:
         broker.stop()
 

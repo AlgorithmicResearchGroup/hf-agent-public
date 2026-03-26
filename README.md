@@ -73,19 +73,32 @@ Then point the launcher at that image:
 export HF_JOB_IMAGE=ghcr.io/algorithmicresearchgroup/hf-agent-public:latest
 ```
 
+For self-serve report delivery, also choose a Bucket you own:
+
+```bash
+hf buckets create your-username/hf-agent
+```
+
 Launch the full orchestrator as one remote job:
 
 ```bash
-python launch_hf_job.py "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A. What model on Hugging Face should I use?"
+python launch_hf_job.py \
+  --report-bucket your-username/hf-agent \
+  "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A. What model on Hugging Face should I use?"
 ```
 
 Wait for completion and stream final logs:
 
 ```bash
-python launch_hf_job.py "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A. What model on Hugging Face should I use?" --wait
+python launch_hf_job.py \
+  --report-bucket your-username/hf-agent \
+  --report-prefix runs/my-query \
+  --wait \
+  "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A. What model on Hugging Face should I use?"
 ```
 
 The launcher submits one Hugging Face Job using your prebuilt Docker image and runs `python run_collab_long.py "<query>"` inside that image.
+If `--report-bucket` is set, the job uploads `report.md`, `run_summary.json`, `qa_report.json`, and related artifacts to that bucket and prints the final `hf://` paths in the logs.
 
 ## Tooling
 
@@ -127,6 +140,7 @@ If the query is about a model family, architecture, optimization, kernel, or tec
 If the query includes hardware or budget constraints, the report should turn them into a concrete recommendation about model scale, fine-tuning method, and operational caveats.
 
 Intermediate files commonly include `papers.md`, `huggingface_ecosystem.md`, `code_examples.md`, and optional `snippets/`.
+When bucket upload is enabled, the run also writes `artifacts_manifest.json` and records uploaded artifact URIs inside `run_summary.json`.
 
 ## Notes
 
