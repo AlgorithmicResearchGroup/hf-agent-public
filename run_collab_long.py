@@ -352,7 +352,12 @@ def stabilize_agent_graph(agents):
 
     def is_synthesis(agent):
         role = role_text(agent)
-        if any(word in role for word in ("synthesis", "report writer", "writer")):
+        if (
+            "synthesis" in role
+            or "report writer" in role
+            or "report synthesizer" in role
+            or "final recommender" in role
+        ):
             return True
         text = task_text(agent)
         return "write the final" in text or "write report.md" in text
@@ -371,22 +376,32 @@ def stabilize_agent_graph(agents):
         text = task_text(agent)
         return any(word in text for word in ("write papers.md", "write huggingface_ecosystem.md", "write training_plan.md"))
 
+    def phase(agent):
+        if is_synthesis(agent):
+            return 2
+        if is_impl(agent):
+            return 1
+        return 0
+
     all_ids = [agent["id"] for agent in agents]
-    research_ids = [agent["id"] for agent in agents if is_research(agent)]
+    research_ids = [agent["id"] for agent in agents if phase(agent) == 0]
+    phase_by_id = {agent["id"]: phase(agent) for agent in agents}
 
     stabilized = []
     for agent in agents:
-        deps = set()
-        if is_synthesis(agent):
-            deps.update(all_ids)
-            deps.discard(agent["id"])
-        elif is_impl(agent):
-            deps.update(research_ids)
-            deps.discard(agent["id"])
+        current_phase = phase(agent)
+        if current_phase == 2:
+            deps = {other_id for other_id in all_ids if other_id != agent["id"] and phase_by_id[other_id] < current_phase}
+        elif current_phase == 1:
+            deps = {other_id for other_id in research_ids if other_id != agent["id"]}
         elif is_research(agent):
             deps = set()
         else:
-            deps = {dep for dep in agent["depends_on"] if dep in all_ids and dep != agent["id"]}
+            deps = {
+                dep
+                for dep in agent["depends_on"]
+                if dep in all_ids and dep != agent["id"] and phase_by_id.get(dep, 0) <= current_phase
+            }
         stabilized.append({**agent, "depends_on": sorted(deps)})
     return stabilized
 

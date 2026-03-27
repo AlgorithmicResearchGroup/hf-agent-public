@@ -15,6 +15,30 @@ def test_stabilize_agent_graph_makes_impl_wait_for_research_and_synth_wait_for_a
     assert stabilized["synth"]["depends_on"] == ["hf", "impl", "lit"]
 
 
+def test_stabilize_agent_graph_breaks_impl_synthesis_cycle_from_orchestrator_output():
+    agents = [
+        {"id": "landscape", "role": "Hugging Face coding/RAG landscape researcher", "task": "Write huggingface_ecosystem.md", "depends_on": []},
+        {"id": "training", "role": "Hardware-aware fine-tuning strategy planner", "task": "Write training_plan.md", "depends_on": []},
+        {
+            "id": "implementation",
+            "role": "Practical implementation + code snippets writer",
+            "task": "Read research artifacts and write code_examples.md",
+            "depends_on": ["landscape", "synthesis", "training"],
+        },
+        {
+            "id": "synthesis",
+            "role": "Report synthesizer and final recommender",
+            "task": "Write report.md",
+            "depends_on": ["implementation", "landscape", "training"],
+        },
+    ]
+
+    stabilized = {agent["id"]: agent for agent in stabilize_agent_graph(agents)}
+
+    assert stabilized["implementation"]["depends_on"] == ["landscape", "training"]
+    assert stabilized["synthesis"]["depends_on"] == ["implementation", "landscape", "training"]
+
+
 def test_build_agent_task_requires_embedded_annotated_report_snippets_for_synthesis():
     agent = {
         "id": "synth",
