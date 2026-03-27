@@ -1,6 +1,8 @@
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlencode
 
@@ -167,6 +169,68 @@ def write_delivery_manifest(
     with open(delivery_path, "w") as handle:
         json.dump(delivery, handle, indent=2)
     return delivery_path
+
+
+def get_hf_token_from_env() -> Optional[str]:
+    for name in ("HUGGINGFACE_HUB_TOKEN", "HF_TOKEN", "HF_HUB_TOKEN"):
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
+
+
+def update_results_space_index(
+    results_space_repo_id: str,
+    delivery: Dict[str, Any],
+) -> None:
+    from huggingface_hub import HfApi, hf_hub_download
+    from huggingface_hub.errors import EntryNotFoundError
+
+    token = get_hf_token_from_env()
+    if not token:
+        raise RuntimeError("Cannot update results Space index without HF_TOKEN or HUGGINGFACE_HUB_TOKEN.")
+
+    api = HfApi(token=token)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        reports_path = Path(tmpdir) / "reports.json"
+        try:
+            existing_path = hf_hub_download(
+                repo_id=results_space_repo_id,
+                filename="reports.json",
+                repo_type="space",
+                token=token,
+            )
+            reports = json.loads(Path(existing_path).read_text()).get("reports", [])
+        except EntryNotFoundError:
+            reports = []
+
+        entry_id = f"{delivery['bucket_id']}::{delivery['bucket_prefix']}"
+        entry = {
+            "id": entry_id,
+            "title": delivery["title"],
+            "status": delivery["status"],
+            "qa_passed": delivery["qa_passed"],
+            "created_at": delivery["created_at"],
+            "bucket_id": delivery["bucket_id"],
+            "bucket_prefix": delivery["bucket_prefix"],
+            "folder_url": delivery["folder_url"],
+            "report_view_url": delivery["report_view_url"],
+            "report_download_url": delivery["report_download_url"],
+            "job_url": delivery.get("job_url"),
+        }
+
+        reports = [report for report in reports if report.get("id") != entry_id]
+        reports.append(entry)
+        reports.sort(key=lambda report: report.get("created_at", ""), reverse=True)
+        reports_path.write_text(json.dumps({"reports": reports}, indent=2), encoding="utf-8")
+
+        api.upload_file(
+            path_or_fileobj=str(reports_path),
+            path_in_repo="reports.json",
+            repo_id=results_space_repo_id,
+            repo_type="space",
+            commit_message=f"Update reports index for {delivery['bucket_prefix']}",
+        )
 
 
 def upload_workspace_to_bucket(

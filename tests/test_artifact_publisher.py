@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from artifact_publisher import (
     build_artifacts_info,
@@ -7,6 +8,7 @@ from artifact_publisher import (
     bucket_file_view_url,
     bucket_folder_url,
     normalize_report_prefix,
+    update_results_space_index,
     upload_workspace_to_bucket,
     write_delivery_manifest,
     write_artifacts_manifest,
@@ -118,3 +120,60 @@ def test_upload_workspace_to_bucket_uses_sync_bucket(monkeypatch, tmp_path):
     assert calls["source"] == str(tmp_path)
     assert calls["destination"] == "hf://buckets/user/hf-agent/runs/demo"
     assert info["primary_artifact"]["path"] == "report.md"
+
+
+def test_update_results_space_index_upserts_report_entry(monkeypatch, tmp_path):
+    uploaded = {}
+    existing_reports_path = tmp_path / "reports.json"
+    existing_reports_path.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "id": "user/hf-agent::runs/older",
+                        "title": "Older report",
+                        "created_at": "2026-03-26T00:00:00+00:00",
+                        "bucket_id": "user/hf-agent",
+                        "bucket_prefix": "runs/older",
+                    }
+                ]
+            }
+        )
+    )
+
+    class FakeApi:
+        def __init__(self, token=None):
+            self.token = token
+
+        def upload_file(self, path_or_fileobj, path_in_repo, repo_id, repo_type, commit_message):
+            uploaded["payload"] = json.loads(Path(path_or_fileobj).read_text())
+            uploaded["path_in_repo"] = path_in_repo
+            uploaded["repo_id"] = repo_id
+            uploaded["repo_type"] = repo_type
+            uploaded["commit_message"] = commit_message
+
+    monkeypatch.setenv("HF_TOKEN", "hf-token")
+    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi, raising=False)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", lambda **kwargs: str(existing_reports_path), raising=False)
+
+    update_results_space_index(
+        "user/hf-agent-results",
+        {
+            "title": "Fresh report",
+            "status": "pass",
+            "qa_passed": True,
+            "created_at": "2026-03-27T00:00:00+00:00",
+            "bucket_id": "user/hf-agent",
+            "bucket_prefix": "runs/newer",
+            "folder_url": "https://huggingface.co/buckets/user/hf-agent/tree/runs/newer",
+            "report_view_url": "https://huggingface.co/buckets/user/hf-agent/tree/runs/newer/report.md",
+            "report_download_url": "https://huggingface.co/buckets/user/hf-agent/resolve/runs/newer/report.md?download=true",
+            "job_url": "https://huggingface.co/jobs/user/job-123",
+        },
+    )
+
+    assert uploaded["repo_id"] == "user/hf-agent-results"
+    assert uploaded["repo_type"] == "space"
+    assert uploaded["path_in_repo"] == "reports.json"
+    assert uploaded["payload"]["reports"][0]["bucket_prefix"] == "runs/newer"
+    assert uploaded["payload"]["reports"][1]["bucket_prefix"] == "runs/older"

@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 
 from artifact_publisher import (
     build_artifacts_info,
+    update_results_space_index,
     upload_workspace_to_bucket,
     write_artifacts_manifest,
     write_delivery_manifest,
@@ -682,6 +683,7 @@ def main():
     report_bucket = os.environ.get("REPORT_BUCKET")
     report_prefix = os.environ.get("REPORT_PREFIX")
     results_space_url = os.environ.get("RESULTS_SPACE_URL")
+    results_space_repo_id = os.environ.get("RESULTS_SPACE_REPO_ID")
     job_url = os.environ.get("JOB_URL")
 
     print("=" * 70)
@@ -848,6 +850,12 @@ def main():
                 print("\n[ARTIFACTS] Uploaded run outputs")
                 print(f"[ARTIFACTS] Primary: {artifacts_info['primary_artifact']['remote_uri']}")
                 print(f"[ARTIFACTS] Bucket: {artifacts_info['bucket_url']}")
+                if results_space_repo_id:
+                    try:
+                        update_results_space_index(results_space_repo_id, summary["delivery"])
+                        print(f"[RESULTS SPACE] Updated index in {results_space_repo_id}")
+                    except Exception as exc:
+                        print(f"[RESULTS SPACE] Index update failed: {exc}")
                 _print_result_links(artifacts_info)
             except Exception as exc:
                 upload_error = str(exc)

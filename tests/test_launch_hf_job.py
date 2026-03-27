@@ -6,6 +6,7 @@ from launch_hf_job import (
     print_result_links,
     parse_timeout_seconds,
     resolve_job_image,
+    resolve_results_space_repo_id,
     resolve_results_space_url,
     resolve_report_prefix,
     should_fallback_to_rest,
@@ -39,12 +40,18 @@ def test_build_job_environment_adds_report_bucket_and_prefix(monkeypatch):
     monkeypatch.delenv("REPORT_PREFIX", raising=False)
     monkeypatch.delenv("RESULTS_SPACE_URL", raising=False)
 
-    env = build_job_environment("user/hf-agent", "runs/demo", "https://huggingface.co/spaces/acme/results")
+    env = build_job_environment(
+        "user/hf-agent",
+        "runs/demo",
+        "https://huggingface.co/spaces/acme/results",
+        "acme/results",
+    )
 
     assert env["PYTHONUNBUFFERED"] == "1"
     assert env["REPORT_BUCKET"] == "user/hf-agent"
     assert env["REPORT_PREFIX"] == "runs/demo"
     assert env["RESULTS_SPACE_URL"] == "https://huggingface.co/spaces/acme/results"
+    assert env["RESULTS_SPACE_REPO_ID"] == "acme/results"
 
 
 def test_resolve_report_prefix_uses_cli_value_when_present():
@@ -72,6 +79,11 @@ def test_resolve_results_space_url_converts_repo_page_to_host(monkeypatch):
     monkeypatch.setattr("launch_hf_job.requests.get", lambda url, timeout=None: FakeResponse())
 
     assert resolve_results_space_url("https://huggingface.co/spaces/matthewkenney/hf-agent-results") == "https://matthewkenney-hf-agent-results.static.hf.space"
+
+
+def test_resolve_results_space_repo_id_extracts_repo_id():
+    assert resolve_results_space_repo_id("https://huggingface.co/spaces/matthewkenney/hf-agent-results") == "matthewkenney/hf-agent-results"
+    assert resolve_results_space_repo_id("https://matthewkenney-hf-agent-results.static.hf.space") is None
 
 
 def test_build_result_links_includes_space_and_download_urls():

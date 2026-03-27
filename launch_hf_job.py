@@ -47,6 +47,7 @@ DEFAULT_ENV_NAMES = [
     "REPORT_BUCKET",
     "REPORT_PREFIX",
     "RESULTS_SPACE_URL",
+    "RESULTS_SPACE_REPO_ID",
 ]
 
 DEFAULT_IMAGE_ENV = "HF_JOB_IMAGE"
@@ -83,6 +84,16 @@ def resolve_results_space_url(cli_value: Optional[str]) -> Optional[str]:
     return value
 
 
+def resolve_results_space_repo_id(cli_value: Optional[str]) -> Optional[str]:
+    if not cli_value:
+        return None
+    value = cli_value.rstrip("/")
+    marker = f"{HF_ENDPOINT}/spaces/"
+    if value.startswith(marker):
+        return value[len(marker) :]
+    return None
+
+
 def build_remote_command(query: str) -> list[str]:
     return ["python", "run_collab_long.py", query]
 
@@ -91,6 +102,7 @@ def build_job_environment(
     cli_report_bucket: Optional[str],
     cli_report_prefix: Optional[str],
     cli_results_space_url: Optional[str],
+    cli_results_space_repo_id: Optional[str],
 ) -> Dict[str, str]:
     env = {"PYTHONUNBUFFERED": "1", **collect_existing_env(DEFAULT_ENV_NAMES)}
     if cli_report_bucket:
@@ -99,6 +111,8 @@ def build_job_environment(
         env["REPORT_PREFIX"] = cli_report_prefix
     if cli_results_space_url:
         env["RESULTS_SPACE_URL"] = cli_results_space_url
+    if cli_results_space_repo_id:
+        env["RESULTS_SPACE_REPO_ID"] = cli_results_space_repo_id
     return env
 
 
@@ -305,6 +319,7 @@ def parse_args():
     parser.add_argument("--report-bucket", help="Bucket to upload final artifacts to, for example username/hf-agent")
     parser.add_argument("--report-prefix", help="Optional prefix inside the target bucket, for example runs/my-job")
     parser.add_argument("--results-space-url", help="Optional public Space URL used to render a clean results page")
+    parser.add_argument("--results-space-repo-id", help="Optional Space repo id to update with the reports index")
     parser.add_argument("--wait", action="store_true", help="Wait for the remote job to finish")
     parser.add_argument("--poll-interval", type=int, default=15, help="Seconds between status polls when waiting")
     return parser.parse_args()
@@ -314,13 +329,14 @@ def main():
     args = parse_args()
     image = resolve_job_image(args.image)
     results_space_url = resolve_results_space_url(args.results_space_url)
+    results_space_repo_id = args.results_space_repo_id or resolve_results_space_repo_id(args.results_space_url)
     if not image:
         raise SystemExit(
             f"Set --image or define {DEFAULT_IMAGE_ENV} to a prebuilt Docker image that contains this repo."
         )
 
     resolved_report_prefix = resolve_report_prefix(args.report_bucket, args.report_prefix)
-    env = build_job_environment(args.report_bucket, resolved_report_prefix, results_space_url)
+    env = build_job_environment(args.report_bucket, resolved_report_prefix, results_space_url, results_space_repo_id)
     secrets = collect_existing_env(DEFAULT_SECRET_NAMES)
 
     try:

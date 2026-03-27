@@ -1,3 +1,5 @@
+const DEFAULT_BUCKET = "matthewkenney/hf-agent";
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -7,80 +9,82 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function bucketResolveUrl(bucket, prefix, path) {
-  const bucketParts = bucket.split("/").map(encodeURIComponent).join("/");
-  const prefixParts = prefix.split("/").filter(Boolean).map(encodeURIComponent).join("/");
-  const fileParts = path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
-  return `https://huggingface.co/buckets/${bucketParts}/resolve/${prefixParts}/${fileParts}`;
-}
-
 function setStatus(message) {
   document.getElementById("status-message").innerHTML = message;
 }
 
-function renderLinks(delivery) {
-  const links = [
-    ["Open Report", delivery.report_view_url],
-    ["Download Report", delivery.report_download_url],
-    ["Open Run Folder", delivery.folder_url],
-    ["Open Job", delivery.job_url],
-  ].filter(([, url]) => url);
-
-  const actions = document.getElementById("actions");
-  actions.innerHTML = links
-    .map(([label, url]) => `<a class="cta" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`)
-    .join("");
-
-  const fallback = document.getElementById("fallback-links");
-  fallback.innerHTML = links
-    .map(([label, url]) => `<li><strong>${escapeHtml(label)}:</strong> <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a></li>`)
-    .join("");
+function linkButton(label, url) {
+  if (!url) {
+    return "";
+  }
+  return `<a class="cta" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
 }
 
-function renderSummary(delivery) {
-  const rows = [
-    ["Status", delivery.status || "unknown"],
-    ["QA Passed", delivery.qa_passed ? "yes" : "no"],
-    ["Created", delivery.created_at || "unknown"],
-    ["Bucket", delivery.bucket_id || ""],
-    ["Prefix", delivery.bucket_prefix || ""],
-  ];
-  document.getElementById("summary").innerHTML = rows
-    .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`)
-    .join("");
-}
-
-async function loadDelivery() {
-  const params = new URLSearchParams(window.location.search);
-  const bucket = params.get("bucket");
-  const prefix = params.get("prefix");
-
-  if (!bucket || !prefix) {
-    document.getElementById("title").textContent = "HF Agent Results";
-    setStatus("Open this Space with <code>?bucket=&lt;bucket&gt;&amp;prefix=&lt;prefix&gt;</code> after a run completes.");
+function renderReports(reports, highlightedPrefix) {
+  const container = document.getElementById("reports-grid");
+  if (!reports.length) {
+    container.innerHTML = "<article class='card empty-card'><h3>No reports yet</h3><p>Run the job once and the completed report will appear here.</p></article>";
+    document.getElementById("report-count").textContent = "0 reports";
     return;
   }
 
-  const deliveryUrl = bucketResolveUrl(bucket, prefix, "delivery.json");
+  document.getElementById("report-count").textContent = `${reports.length} report${reports.length === 1 ? "" : "s"}`;
+  container.innerHTML = reports
+    .map((report) => {
+      const highlighted = report.bucket_prefix === highlightedPrefix ? " report-card-highlighted" : "";
+      return `
+        <article class="card report-card${highlighted}">
+          <div class="report-topline">
+            <p class="report-prefix">${escapeHtml(report.bucket_prefix || "")}</p>
+            <span class="status-pill">${escapeHtml(report.status || "unknown")}</span>
+          </div>
+          <h3>${escapeHtml(report.title || "Untitled report")}</h3>
+          <p class="report-meta">Created: ${escapeHtml(report.created_at || "unknown")}</p>
+          <div class="actions">
+            ${linkButton("Open Report", report.report_view_url)}
+            ${linkButton("Download", report.report_download_url)}
+            ${linkButton("Open Folder", report.folder_url)}
+            ${linkButton("Job", report.job_url)}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function loadReportIndex() {
+  const params = new URLSearchParams(window.location.search);
+  const bucket = params.get("bucket") || DEFAULT_BUCKET;
+  const prefix = params.get("prefix");
+  document.getElementById("title").textContent = "Report Index";
+  document.getElementById("lede").textContent = `Showing completed reports for ${bucket}.`;
+
   try {
-    setStatus("Fetching delivery manifest…");
-    const response = await fetch(deliveryUrl);
+    setStatus("Loading report index…");
+    const response = await fetch("./reports.json", { cache: "no-store" });
     if (!response.ok) {
-      throw new Error(`delivery.json not available yet (${response.status})`);
+      throw new Error(`reports.json not available (${response.status})`);
     }
 
-    const delivery = await response.json();
-    document.getElementById("title").textContent = delivery.title || "HF Agent Results";
-    document.getElementById("lede").textContent = "This report is now available. Use the buttons below to open the final report or the underlying run artifacts.";
-    renderLinks(delivery);
-    renderSummary(delivery);
-    setStatus(`Loaded delivery manifest from ${escapeHtml(deliveryUrl)}`);
-  } catch (error) {
-    document.getElementById("title").textContent = "Results not ready yet";
+    const payload = await response.json();
+    const reports = (payload.reports || []).filter((report) => (report.bucket_id || DEFAULT_BUCKET) === bucket);
+    if (prefix) {
+      reports.sort((a, b) => {
+        if (a.bucket_prefix === prefix) return -1;
+        if (b.bucket_prefix === prefix) return 1;
+        return (b.created_at || "").localeCompare(a.created_at || "");
+      });
+    }
+    renderReports(reports, prefix);
     setStatus(
-      `The run may still be executing or uploading artifacts. Retry in a moment, or open the bucket folder directly once it exists.<br><br><code>${escapeHtml(deliveryUrl)}</code><br><br>${escapeHtml(error.message)}`
+      prefix
+        ? `Showing reports for ${escapeHtml(bucket)}. Highlighted run: <code>${escapeHtml(prefix)}</code>.`
+        : `Showing all reports for ${escapeHtml(bucket)}.`
     );
+  } catch (error) {
+    renderReports([], prefix);
+    setStatus(`Unable to load the report index yet. ${escapeHtml(error.message)}`);
   }
 }
 
-loadDelivery();
+loadReportIndex();
