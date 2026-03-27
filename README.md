@@ -79,11 +79,18 @@ For self-serve report delivery, also choose a Bucket you own:
 hf buckets create your-username/hf-agent
 ```
 
+If you want a clean user-facing results page instead of raw bucket links, deploy the companion Space in [`results_space/`](./results_space) and note its public URL:
+
+```bash
+export RESULTS_SPACE_URL=https://huggingface.co/spaces/your-username/hf-agent-results
+```
+
 Launch the full orchestrator as one remote job:
 
 ```bash
 python launch_hf_job.py \
   --report-bucket your-username/hf-agent \
+  --results-space-url "$RESULTS_SPACE_URL" \
   "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A. What model on Hugging Face should I use?"
 ```
 
@@ -93,12 +100,21 @@ Wait for completion and stream final logs:
 python launch_hf_job.py \
   --report-bucket your-username/hf-agent \
   --report-prefix runs/my-query \
+  --results-space-url "$RESULTS_SPACE_URL" \
   --wait \
   "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A. What model on Hugging Face should I use?"
 ```
 
 The launcher submits one Hugging Face Job using your prebuilt Docker image and runs `python run_collab_long.py "<query>"` inside that image.
-If `--report-bucket` is set, the job uploads `report.md`, `run_summary.json`, `qa_report.json`, and related artifacts to that bucket and prints the final `hf://` paths in the logs.
+If `--report-bucket` is set, the job uploads `report.md`, `run_summary.json`, `qa_report.json`, and related artifacts to that bucket.
+The launcher and remote job both print a `RESULT LINKS` block with:
+
+- the optional Space results URL
+- the direct `report.md` viewer URL
+- the direct download URL
+- the bucket folder URL
+
+When `--report-prefix` is omitted, the launcher now generates one up front so those links are known immediately after job submission.
 
 ## Tooling
 
@@ -140,9 +156,15 @@ If the query is about a model family, architecture, optimization, kernel, or tec
 If the query includes hardware or budget constraints, the report should turn them into a concrete recommendation about model scale, fine-tuning method, and operational caveats.
 
 Intermediate files commonly include `papers.md`, `huggingface_ecosystem.md`, `code_examples.md`, and optional `snippets/`.
-When bucket upload is enabled, the run also writes `artifacts_manifest.json` and records uploaded artifact URIs inside `run_summary.json`.
+When bucket upload is enabled, the run also writes:
+
+- `artifacts_manifest.json` for the full artifact inventory
+- `delivery.json` for the human-facing result links
+
+The uploaded `run_summary.json` also records the direct viewer/download/folder URLs.
 
 ## Notes
 
 - The current Flask web UI is not the primary path and has not been expanded for the new workflow.
 - `run_collab_long.py` is the core orchestrator and is the command that the Hugging Face Job runs remotely.
+- [`results_space/`](./results_space) is a small deployable companion Space that renders a clean results page from a public Bucket `delivery.json`.

@@ -1,9 +1,12 @@
 from launch_hf_job import (
+    build_result_links,
     build_job_environment,
     build_remote_command,
     get_hf_token,
+    print_result_links,
     parse_timeout_seconds,
     resolve_job_image,
+    resolve_report_prefix,
     should_fallback_to_rest,
     submit_job_via_rest,
 )
@@ -33,12 +36,54 @@ def test_build_remote_command_runs_orchestrator_from_image():
 def test_build_job_environment_adds_report_bucket_and_prefix(monkeypatch):
     monkeypatch.delenv("REPORT_BUCKET", raising=False)
     monkeypatch.delenv("REPORT_PREFIX", raising=False)
+    monkeypatch.delenv("RESULTS_SPACE_URL", raising=False)
 
-    env = build_job_environment("user/hf-agent", "runs/demo")
+    env = build_job_environment("user/hf-agent", "runs/demo", "https://huggingface.co/spaces/acme/results")
 
     assert env["PYTHONUNBUFFERED"] == "1"
     assert env["REPORT_BUCKET"] == "user/hf-agent"
     assert env["REPORT_PREFIX"] == "runs/demo"
+    assert env["RESULTS_SPACE_URL"] == "https://huggingface.co/spaces/acme/results"
+
+
+def test_resolve_report_prefix_uses_cli_value_when_present():
+    assert resolve_report_prefix("user/hf-agent", "runs/demo") == "runs/demo"
+
+
+def test_resolve_report_prefix_generates_default_for_bucket():
+    prefix = resolve_report_prefix("user/hf-agent", None)
+
+    assert prefix.startswith("runs/")
+
+
+def test_build_result_links_includes_space_and_download_urls():
+    links = build_result_links(
+        "user/hf-agent",
+        "runs/demo",
+        "https://huggingface.co/spaces/acme/results",
+        "https://huggingface.co/jobs/user/job-123",
+    )
+
+    assert links["results_page_url"] == "https://huggingface.co/spaces/acme/results?bucket=user%2Fhf-agent&prefix=runs%2Fdemo"
+    assert links["report_view_url"] == "https://huggingface.co/buckets/user/hf-agent/tree/runs/demo/report.md"
+    assert links["report_download_url"] == "https://huggingface.co/buckets/user/hf-agent/resolve/runs/demo/report.md?download=true"
+    assert links["job_url"] == "https://huggingface.co/jobs/user/job-123"
+
+
+def test_print_result_links_outputs_space_url_first(capsys):
+    print_result_links(
+        {
+            "results_page_url": "https://huggingface.co/spaces/acme/results?bucket=user%2Fhf-agent&prefix=runs%2Fdemo",
+            "job_url": "https://huggingface.co/jobs/user/job-123",
+            "report_view_url": "https://huggingface.co/buckets/user/hf-agent/tree/runs/demo/report.md",
+            "report_download_url": "https://huggingface.co/buckets/user/hf-agent/resolve/runs/demo/report.md?download=true",
+            "folder_url": "https://huggingface.co/buckets/user/hf-agent/tree/runs/demo",
+        }
+    )
+
+    output = capsys.readouterr().out.strip().splitlines()
+    assert output[0] == "RESULT LINKS"
+    assert output[2].startswith("Open Results: ")
 
 
 def test_get_hf_token_prefers_hub_token(monkeypatch):

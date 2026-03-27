@@ -8,11 +8,20 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Dict, Optional
 
 import requests
 from huggingface_hub import HfApi, run_job
+
+from artifact_publisher import (
+    build_results_page_url,
+    bucket_file_resolve_url,
+    bucket_file_view_url,
+    bucket_folder_url,
+    normalize_report_prefix,
+)
 
 
 DEFAULT_SECRET_NAMES = [
@@ -37,6 +46,7 @@ DEFAULT_ENV_NAMES = [
     "FIX_RUNTIME_SECONDS",
     "REPORT_BUCKET",
     "REPORT_PREFIX",
+    "RESULTS_SPACE_URL",
 ]
 
 DEFAULT_IMAGE_ENV = "HF_JOB_IMAGE"
@@ -60,13 +70,64 @@ def build_remote_command(query: str) -> list[str]:
     return ["python", "run_collab_long.py", query]
 
 
-def build_job_environment(cli_report_bucket: Optional[str], cli_report_prefix: Optional[str]) -> Dict[str, str]:
+def build_job_environment(
+    cli_report_bucket: Optional[str],
+    cli_report_prefix: Optional[str],
+    cli_results_space_url: Optional[str],
+) -> Dict[str, str]:
     env = {"PYTHONUNBUFFERED": "1", **collect_existing_env(DEFAULT_ENV_NAMES)}
     if cli_report_bucket:
         env["REPORT_BUCKET"] = cli_report_bucket
     if cli_report_prefix:
         env["REPORT_PREFIX"] = cli_report_prefix
+    if cli_results_space_url:
+        env["RESULTS_SPACE_URL"] = cli_results_space_url
     return env
+
+
+def resolve_report_prefix(report_bucket: Optional[str], cli_report_prefix: Optional[str]) -> Optional[str]:
+    if not report_bucket:
+        return cli_report_prefix
+    if cli_report_prefix:
+        return normalize_report_prefix(cli_report_prefix, ".")
+    return datetime.now().strftime("runs/%Y%m%d-%H%M%S")
+
+
+def build_result_links(
+    report_bucket: Optional[str],
+    report_prefix: Optional[str],
+    results_space_url: Optional[str],
+    job_url: Optional[str],
+) -> Optional[Dict[str, str]]:
+    if not report_bucket or not report_prefix:
+        return None
+    normalized_prefix = normalize_report_prefix(report_prefix, ".")
+    links = {
+        "folder_url": bucket_folder_url(report_bucket, normalized_prefix),
+        "report_view_url": bucket_file_view_url(report_bucket, normalized_prefix, "report.md"),
+        "report_raw_url": bucket_file_resolve_url(report_bucket, normalized_prefix, "report.md"),
+        "report_download_url": bucket_file_resolve_url(report_bucket, normalized_prefix, "report.md", download=True),
+    }
+    results_page_url = build_results_page_url(results_space_url, report_bucket, normalized_prefix)
+    if results_page_url:
+        links["results_page_url"] = results_page_url
+    if job_url:
+        links["job_url"] = job_url
+    return links
+
+
+def print_result_links(links: Optional[Dict[str, str]]):
+    if not links:
+        return
+    print("\nRESULT LINKS")
+    print("=" * 12)
+    if links.get("results_page_url"):
+        print(f"Open Results: {links['results_page_url']}")
+    if links.get("job_url"):
+        print(f"Job: {links['job_url']}")
+    print(f"Report: {links['report_view_url']}")
+    print(f"Download: {links['report_download_url']}")
+    print(f"Folder: {links['folder_url']}")
 
 
 def get_hf_token() -> Optional[str]:
@@ -226,6 +287,7 @@ def parse_args():
     parser.add_argument("--namespace", help="Optional Hugging Face user or org namespace")
     parser.add_argument("--report-bucket", help="Bucket to upload final artifacts to, for example username/hf-agent")
     parser.add_argument("--report-prefix", help="Optional prefix inside the target bucket, for example runs/my-job")
+    parser.add_argument("--results-space-url", help="Optional public Space URL used to render a clean results page")
     parser.add_argument("--wait", action="store_true", help="Wait for the remote job to finish")
     parser.add_argument("--poll-interval", type=int, default=15, help="Seconds between status polls when waiting")
     return parser.parse_args()
@@ -239,7 +301,8 @@ def main():
             f"Set --image or define {DEFAULT_IMAGE_ENV} to a prebuilt Docker image that contains this repo."
         )
 
-    env = build_job_environment(args.report_bucket, args.report_prefix)
+    resolved_report_prefix = resolve_report_prefix(args.report_bucket, args.report_prefix)
+    env = build_job_environment(args.report_bucket, resolved_report_prefix, args.results_space_url)
     secrets = collect_existing_env(DEFAULT_SECRET_NAMES)
 
     try:
@@ -270,11 +333,13 @@ def main():
     print(f"URL: {job.url}")
     print(f"Flavor: {job.flavor}")
     print(f"Image: {image}")
+    print_result_links(build_result_links(args.report_bucket, resolved_report_prefix, args.results_space_url, job.url))
 
     if not args.wait:
         return
 
     stage = wait_for_job(job.id, args.namespace, args.poll_interval)
+    print_result_links(build_result_links(args.report_bucket, resolved_report_prefix, args.results_space_url, job.url))
     sys.exit(0 if stage == "COMPLETED" else 1)
 
 

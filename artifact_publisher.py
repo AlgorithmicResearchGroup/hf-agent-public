@@ -1,9 +1,12 @@
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote, urlencode
 
 
 IGNORED_DIRS = {"__pycache__", ".git", "node_modules", ".venv", "venv"}
+HF_WEB_ENDPOINT = "https://huggingface.co"
 
 
 def normalize_report_prefix(prefix: Optional[str], shared_dir: str) -> str:
@@ -20,7 +23,34 @@ def bucket_destination(bucket_id: str, prefix: str) -> str:
 
 
 def bucket_browse_url(bucket_id: str) -> str:
-    return f"https://huggingface.co/buckets/{bucket_id}"
+    return f"{HF_WEB_ENDPOINT}/buckets/{bucket_id}"
+
+
+def _quote_path(path: str) -> str:
+    return quote(path.strip("/"), safe="/")
+
+
+def bucket_folder_url(bucket_id: str, prefix: str) -> str:
+    return f"{bucket_browse_url(bucket_id)}/tree/{_quote_path(normalize_report_prefix(prefix, '.'))}"
+
+
+def bucket_file_view_url(bucket_id: str, prefix: str, relative_path: str) -> str:
+    return f"{bucket_folder_url(bucket_id, prefix)}/{_quote_path(relative_path)}"
+
+
+def bucket_file_resolve_url(bucket_id: str, prefix: str, relative_path: str, *, download: bool = False) -> str:
+    url = f"{bucket_browse_url(bucket_id)}/resolve/{_quote_path(normalize_report_prefix(prefix, '.'))}/{_quote_path(relative_path)}"
+    if download:
+        return f"{url}?download=true"
+    return url
+
+
+def build_results_page_url(results_space_url: Optional[str], bucket_id: str, prefix: str) -> Optional[str]:
+    if not results_space_url:
+        return None
+    base = results_space_url.rstrip("/")
+    query = urlencode({"bucket": bucket_id, "prefix": normalize_report_prefix(prefix, ".")})
+    return f"{base}?{query}"
 
 
 def collect_workspace_files(shared_dir: str) -> List[str]:
@@ -36,7 +66,12 @@ def collect_workspace_files(shared_dir: str) -> List[str]:
     return sorted(files)
 
 
-def build_artifacts_info(shared_dir: str, bucket_id: str, prefix: Optional[str]) -> Dict[str, Any]:
+def build_artifacts_info(
+    shared_dir: str,
+    bucket_id: str,
+    prefix: Optional[str],
+    results_space_url: Optional[str] = None,
+) -> Dict[str, Any]:
     normalized_prefix = normalize_report_prefix(prefix, shared_dir)
     destination = bucket_destination(bucket_id, normalized_prefix)
     files = collect_workspace_files(shared_dir)
@@ -49,22 +84,33 @@ def build_artifacts_info(shared_dir: str, bucket_id: str, prefix: Optional[str])
                 "path": rel,
                 "local_path": local_path,
                 "remote_uri": remote_uri,
+                "view_url": bucket_file_view_url(bucket_id, normalized_prefix, rel),
+                "raw_url": bucket_file_resolve_url(bucket_id, normalized_prefix, rel),
+                "download_url": bucket_file_resolve_url(bucket_id, normalized_prefix, rel, download=True),
                 "size_bytes": os.path.getsize(local_path),
             }
         )
 
     primary_rel = "report.md" if "report.md" in files else "run_summary.json"
-    return {
+    info = {
         "bucket_id": bucket_id,
         "bucket_prefix": normalized_prefix,
         "bucket_uri": destination,
         "bucket_url": bucket_browse_url(bucket_id),
+        "folder_url": bucket_folder_url(bucket_id, normalized_prefix),
         "primary_artifact": {
             "path": primary_rel,
             "remote_uri": f"{destination}/{primary_rel}",
+            "view_url": bucket_file_view_url(bucket_id, normalized_prefix, primary_rel),
+            "raw_url": bucket_file_resolve_url(bucket_id, normalized_prefix, primary_rel),
+            "download_url": bucket_file_resolve_url(bucket_id, normalized_prefix, primary_rel, download=True),
         },
         "files": entries,
     }
+    results_page_url = build_results_page_url(results_space_url, bucket_id, normalized_prefix)
+    if results_page_url:
+        info["results_page_url"] = results_page_url
+    return info
 
 
 def write_artifacts_manifest(shared_dir: str, artifacts: Dict[str, Any], status: str, upload_error: Optional[str] = None) -> str:
@@ -74,9 +120,12 @@ def write_artifacts_manifest(shared_dir: str, artifacts: Dict[str, Any], status:
         "bucket_prefix": artifacts["bucket_prefix"],
         "bucket_uri": artifacts["bucket_uri"],
         "bucket_url": artifacts["bucket_url"],
+        "folder_url": artifacts.get("folder_url"),
         "primary_artifact": artifacts["primary_artifact"],
         "files": artifacts["files"],
     }
+    if artifacts.get("results_page_url"):
+        manifest["results_page_url"] = artifacts["results_page_url"]
     if upload_error:
         manifest["upload_error"] = upload_error
 
@@ -86,11 +135,50 @@ def write_artifacts_manifest(shared_dir: str, artifacts: Dict[str, Any], status:
     return manifest_path
 
 
-def upload_workspace_to_bucket(shared_dir: str, bucket_id: str, prefix: Optional[str]) -> Dict[str, Any]:
+def write_delivery_manifest(
+    shared_dir: str,
+    artifacts: Dict[str, Any],
+    *,
+    task: str,
+    status: str,
+    qa_passed: bool,
+    job_url: Optional[str] = None,
+) -> str:
+    delivery = {
+        "title": task,
+        "status": status,
+        "qa_passed": qa_passed,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "bucket_id": artifacts["bucket_id"],
+        "bucket_prefix": artifacts["bucket_prefix"],
+        "bucket_url": artifacts["bucket_url"],
+        "folder_url": artifacts.get("folder_url"),
+        "report_path": artifacts["primary_artifact"]["path"],
+        "report_view_url": artifacts["primary_artifact"].get("view_url"),
+        "report_raw_url": artifacts["primary_artifact"].get("raw_url"),
+        "report_download_url": artifacts["primary_artifact"].get("download_url"),
+    }
+    if job_url:
+        delivery["job_url"] = job_url
+    if artifacts.get("results_page_url"):
+        delivery["results_page_url"] = artifacts["results_page_url"]
+
+    delivery_path = os.path.join(shared_dir, "delivery.json")
+    with open(delivery_path, "w") as handle:
+        json.dump(delivery, handle, indent=2)
+    return delivery_path
+
+
+def upload_workspace_to_bucket(
+    shared_dir: str,
+    bucket_id: str,
+    prefix: Optional[str],
+    results_space_url: Optional[str] = None,
+) -> Dict[str, Any]:
     from huggingface_hub import sync_bucket
 
     normalized_prefix = normalize_report_prefix(prefix, shared_dir)
-    artifacts = build_artifacts_info(shared_dir, bucket_id, normalized_prefix)
+    artifacts = build_artifacts_info(shared_dir, bucket_id, normalized_prefix, results_space_url=results_space_url)
     destination = artifacts["bucket_uri"]
     sync_bucket(str(shared_dir), destination)
     return artifacts

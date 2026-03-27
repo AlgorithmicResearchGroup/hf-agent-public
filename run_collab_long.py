@@ -24,7 +24,12 @@ import time
 
 from dotenv import load_dotenv
 
-from artifact_publisher import build_artifacts_info, upload_workspace_to_bucket, write_artifacts_manifest
+from artifact_publisher import (
+    build_artifacts_info,
+    upload_workspace_to_bucket,
+    write_artifacts_manifest,
+    write_delivery_manifest,
+)
 from agent.utils import anthropic_to_openai
 from agent_protocol.broker import MessageBroker
 
@@ -623,6 +628,15 @@ def _print_workspace(shared_dir):
             print(f"  {rel} ({os.path.getsize(path)} bytes)")
 
 
+def _print_result_links(artifacts_info):
+    print("\n[RESULT LINKS]")
+    if artifacts_info.get("results_page_url"):
+        print(f"[RESULT LINKS] Open Results: {artifacts_info['results_page_url']}")
+    print(f"[RESULT LINKS] Report: {artifacts_info['primary_artifact']['view_url']}")
+    print(f"[RESULT LINKS] Download: {artifacts_info['primary_artifact']['download_url']}")
+    print(f"[RESULT LINKS] Folder: {artifacts_info['folder_url']}")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Multi-agent Hugging Face model advisor orchestrator")
     parser.add_argument("task", nargs="?", help="Task description string")
@@ -667,6 +681,8 @@ def main():
     fix_runtime = int(os.environ.get("FIX_RUNTIME_SECONDS", "120"))
     report_bucket = os.environ.get("REPORT_BUCKET")
     report_prefix = os.environ.get("REPORT_PREFIX")
+    results_space_url = os.environ.get("RESULTS_SPACE_URL")
+    job_url = os.environ.get("JOB_URL")
 
     print("=" * 70)
     print("HUGGING FACE MODEL ADVISOR ORCHESTRATOR")
@@ -777,7 +793,12 @@ def main():
 
         artifacts_info = None
         if report_bucket:
-            artifacts_info = build_artifacts_info(shared_dir, report_bucket, report_prefix)
+            artifacts_info = build_artifacts_info(
+                shared_dir,
+                report_bucket,
+                report_prefix,
+                results_space_url=results_space_url,
+            )
             artifacts_info["upload_status"] = "pending"
             summary["artifacts"] = artifacts_info
 
@@ -787,23 +808,62 @@ def main():
 
         upload_error = None
         if report_bucket:
+            write_delivery_manifest(
+                shared_dir,
+                artifacts_info,
+                task=task,
+                status=summary["status"],
+                qa_passed=qa_passed,
+                job_url=job_url,
+            )
             write_artifacts_manifest(shared_dir, artifacts_info, status="pending")
             try:
-                artifacts_info = upload_workspace_to_bucket(shared_dir, report_bucket, report_prefix)
+                artifacts_info = upload_workspace_to_bucket(
+                    shared_dir,
+                    report_bucket,
+                    report_prefix,
+                    results_space_url=results_space_url,
+                )
                 artifacts_info["upload_status"] = "uploaded"
                 summary["artifacts"] = artifacts_info
+                delivery_path = write_delivery_manifest(
+                    shared_dir,
+                    artifacts_info,
+                    task=task,
+                    status=summary["status"],
+                    qa_passed=qa_passed,
+                    job_url=job_url,
+                )
+                with open(delivery_path) as handle:
+                    summary["delivery"] = json.load(handle)
                 with open(summary_path, "w") as handle:
                     json.dump(summary, handle, indent=2)
                 write_artifacts_manifest(shared_dir, artifacts_info, status="uploaded")
-                upload_workspace_to_bucket(shared_dir, report_bucket, report_prefix)
+                upload_workspace_to_bucket(
+                    shared_dir,
+                    report_bucket,
+                    report_prefix,
+                    results_space_url=results_space_url,
+                )
                 print("\n[ARTIFACTS] Uploaded run outputs")
                 print(f"[ARTIFACTS] Primary: {artifacts_info['primary_artifact']['remote_uri']}")
                 print(f"[ARTIFACTS] Bucket: {artifacts_info['bucket_url']}")
+                _print_result_links(artifacts_info)
             except Exception as exc:
                 upload_error = str(exc)
                 artifacts_info["upload_status"] = "failed"
                 artifacts_info["upload_error"] = upload_error
                 summary["artifacts"] = artifacts_info
+                delivery_path = write_delivery_manifest(
+                    shared_dir,
+                    artifacts_info,
+                    task=task,
+                    status="failed",
+                    qa_passed=qa_passed,
+                    job_url=job_url,
+                )
+                with open(delivery_path) as handle:
+                    summary["delivery"] = json.load(handle)
                 with open(summary_path, "w") as handle:
                     json.dump(summary, handle, indent=2)
                 write_artifacts_manifest(shared_dir, artifacts_info, status="failed", upload_error=upload_error)
