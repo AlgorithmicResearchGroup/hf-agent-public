@@ -66,6 +66,23 @@ def resolve_job_image(cli_value: Optional[str]) -> Optional[str]:
     return cli_value or os.environ.get(DEFAULT_IMAGE_ENV)
 
 
+def resolve_results_space_url(cli_value: Optional[str]) -> Optional[str]:
+    if not cli_value:
+        return None
+    value = cli_value.rstrip("/")
+    marker = f"{HF_ENDPOINT}/spaces/"
+    if not value.startswith(marker):
+        return value
+
+    repo_id = value[len(marker) :]
+    response = requests.get(f"{HF_ENDPOINT}/api/spaces/{repo_id}", timeout=30)
+    response.raise_for_status()
+    host = response.json().get("host")
+    if host:
+        return host.rstrip("/")
+    return value
+
+
 def build_remote_command(query: str) -> list[str]:
     return ["python", "run_collab_long.py", query]
 
@@ -296,13 +313,14 @@ def parse_args():
 def main():
     args = parse_args()
     image = resolve_job_image(args.image)
+    results_space_url = resolve_results_space_url(args.results_space_url)
     if not image:
         raise SystemExit(
             f"Set --image or define {DEFAULT_IMAGE_ENV} to a prebuilt Docker image that contains this repo."
         )
 
     resolved_report_prefix = resolve_report_prefix(args.report_bucket, args.report_prefix)
-    env = build_job_environment(args.report_bucket, resolved_report_prefix, args.results_space_url)
+    env = build_job_environment(args.report_bucket, resolved_report_prefix, results_space_url)
     secrets = collect_existing_env(DEFAULT_SECRET_NAMES)
 
     try:
@@ -333,13 +351,13 @@ def main():
     print(f"URL: {job.url}")
     print(f"Flavor: {job.flavor}")
     print(f"Image: {image}")
-    print_result_links(build_result_links(args.report_bucket, resolved_report_prefix, args.results_space_url, job.url))
+    print_result_links(build_result_links(args.report_bucket, resolved_report_prefix, results_space_url, job.url))
 
     if not args.wait:
         return
 
     stage = wait_for_job(job.id, args.namespace, args.poll_interval)
-    print_result_links(build_result_links(args.report_bucket, resolved_report_prefix, args.results_space_url, job.url))
+    print_result_links(build_result_links(args.report_bucket, resolved_report_prefix, results_space_url, job.url))
     sys.exit(0 if stage == "COMPLETED" else 1)
 
 

@@ -6,6 +6,7 @@ from launch_hf_job import (
     print_result_links,
     parse_timeout_seconds,
     resolve_job_image,
+    resolve_results_space_url,
     resolve_report_prefix,
     should_fallback_to_rest,
     submit_job_via_rest,
@@ -54,6 +55,23 @@ def test_resolve_report_prefix_generates_default_for_bucket():
     prefix = resolve_report_prefix("user/hf-agent", None)
 
     assert prefix.startswith("runs/")
+
+
+def test_resolve_results_space_url_passes_through_host_url():
+    assert resolve_results_space_url("https://matthewkenney-hf-agent-results.static.hf.space") == "https://matthewkenney-hf-agent-results.static.hf.space"
+
+
+def test_resolve_results_space_url_converts_repo_page_to_host(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"host": "https://matthewkenney-hf-agent-results.static.hf.space"}
+
+    monkeypatch.setattr("launch_hf_job.requests.get", lambda url, timeout=None: FakeResponse())
+
+    assert resolve_results_space_url("https://huggingface.co/spaces/matthewkenney/hf-agent-results") == "https://matthewkenney-hf-agent-results.static.hf.space"
 
 
 def test_build_result_links_includes_space_and_download_urls():

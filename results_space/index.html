@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HF Agent Results</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <p class="eyebrow">Hugging Face Agent Results</p>
+        <h1 id="title">Loading results…</h1>
+        <p class="lede" id="lede">This page reads a public <code>delivery.json</code> from a bucket prefix and turns it into a cleaner report view.</p>
+        <div class="actions" id="actions"></div>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Run Summary</h2>
+          <table id="summary"></table>
+        </article>
+        <article class="card">
+          <h2>Fallback Links</h2>
+          <ul id="fallback-links"></ul>
+        </article>
+      </section>
+
+      <section class="card status-card" id="status-card">
+        <h2>Status</h2>
+        <p id="status-message">Waiting for query parameters.</p>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+  </html>
