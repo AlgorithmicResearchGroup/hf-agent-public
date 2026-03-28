@@ -38,6 +38,67 @@ Provider packs in `manifest.json`:
 - `default` keeps the direct OpenAI SDK path
 - `anthropic` keeps the direct Anthropic SDK path
 
+## LiteLLM Usage
+
+This repo supports direct provider SDKs and a provider-agnostic LiteLLM path.
+
+If you want to route model calls through LiteLLM:
+
+```bash
+export PROVIDER=litellm
+```
+
+There are two ways to choose the model:
+
+1. Use a settings pack from `manifest.json`
+
+```bash
+export SETTINGS_PACK=litellm_openai
+```
+
+or
+
+```bash
+export SETTINGS_PACK=litellm_anthropic
+```
+
+2. Override the model directly
+
+```bash
+export PROVIDER=litellm
+export ORCHESTRATOR_MODEL=<litellm-model-name>
+export AGENT_MODEL=<litellm-model-name>
+```
+
+Examples of valid LiteLLM model names:
+
+- `openai/gpt-5.2`
+- `anthropic/claude-opus-4-6`
+- any other model string supported by your LiteLLM provider setup
+
+Important:
+
+- Use the model name LiteLLM expects for that provider. The provider prefix is often part of the model string.
+- Set the provider credential that LiteLLM expects, for example `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or the equivalent env var for your chosen provider.
+- This repo also maps `OPENAI` to `OPENAI_API_KEY` and `ANTHROPIC` to `ANTHROPIC_API_KEY` automatically when using LiteLLM, so existing OpenAI/Anthropic setups continue to work.
+
+Single-agent example with an explicit LiteLLM model:
+
+```bash
+export PROVIDER=litellm
+export AGENT_MODEL=<litellm-model-name>
+python main.py "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A. What model on Hugging Face should I use?"
+```
+
+Multi-agent example with explicit LiteLLM models:
+
+```bash
+export PROVIDER=litellm
+export ORCHESTRATOR_MODEL=<litellm-model-name>
+export AGENT_MODEL=<litellm-model-name>
+python run_collab_long.py "I have 1x A100 80GB and want to fine-tune a coding model for repository Q&A. What model on Hugging Face should I use?"
+```
+
 ## Run Locally
 
 Single agent:
