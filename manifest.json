@@ -1,11 +1,27 @@
 {
-    "defaultSettingsPack": "default",
+    "defaultSettingsPack": "litellm_openai",
     "settingsPacks": {
         "default": {
             "description": "Default configuration (OpenAI)",
             "model": "gpt-5.2",
             "max_iterations": 100,
             "provider": "openai",
+            "max_runtime_seconds": 600,
+            "max_tokens": 4096
+        },
+        "litellm_openai": {
+            "description": "LiteLLM via OpenAI GPT-5.2",
+            "model": "openai/gpt-5.2",
+            "max_iterations": 100,
+            "provider": "litellm",
+            "max_runtime_seconds": 600,
+            "max_tokens": 4096
+        },
+        "litellm_anthropic": {
+            "description": "LiteLLM via Anthropic Claude Opus 4.6",
+            "model": "anthropic/claude-opus-4-6",
+            "max_iterations": 100,
+            "provider": "litellm",
             "max_runtime_seconds": 600,
             "max_tokens": 4096
         },

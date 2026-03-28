@@ -28,8 +28,15 @@ Optional:
 
 ```bash
 export ANTHROPIC=...
-export SETTINGS_PACK=default
+export SETTINGS_PACK=litellm_openai
 ```
+
+Provider packs in `manifest.json`:
+
+- `litellm_openai` uses LiteLLM with `openai/gpt-5.2`
+- `litellm_anthropic` uses LiteLLM with `anthropic/claude-opus-4-6`
+- `default` keeps the direct OpenAI SDK path
+- `anthropic` keeps the direct Anthropic SDK path
 
 ## Run Locally
 

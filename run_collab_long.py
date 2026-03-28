@@ -31,7 +31,7 @@ from artifact_publisher import (
     write_artifacts_manifest,
     write_delivery_manifest,
 )
-from agent.utils import anthropic_to_openai
+from agent.utils import anthropic_to_openai, ensure_litellm_env
 from agent_protocol.broker import MessageBroker
 
 load_dotenv()
@@ -264,6 +264,24 @@ def call_orchestrator_anthropic(model_name, task):
     raise RuntimeError("Anthropic response contained no tool_use block")
 
 
+def call_orchestrator_litellm(model_name, task):
+    from litellm import completion
+
+    ensure_litellm_env()
+    response = completion(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": ORCHESTRATOR_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Decompose this Hugging Face model-selection task into agent assignments:\n\n{task}"},
+        ],
+        tools=[anthropic_to_openai(DECOMPOSE_TOOL)],
+        parallel_tool_calls=False,
+        max_tokens=4096,
+        temperature=0,
+    )
+    return _parse_litellm_tool_result(response)
+
+
 def _build_assign_fixes_prompt(report, agents):
     agent_lines = []
     for agent in agents:
@@ -319,6 +337,45 @@ def call_assign_fixes_anthropic(model_name, report, agents):
         if block.type == "tool_use":
             return block.input
     raise RuntimeError("Anthropic response contained no tool_use block")
+
+
+def call_assign_fixes_litellm(model_name, report, agents):
+    from litellm import completion
+
+    ensure_litellm_env()
+    response = completion(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": ASSIGN_FIXES_SYSTEM_PROMPT},
+            {"role": "user", "content": _build_assign_fixes_prompt(report, agents)},
+        ],
+        tools=[anthropic_to_openai(ASSIGN_FIXES_TOOL)],
+        parallel_tool_calls=False,
+        max_tokens=4096,
+        temperature=0,
+    )
+    return _parse_litellm_tool_result(response)
+
+
+def _get_litellm_field(obj, field):
+    if isinstance(obj, dict):
+        return obj.get(field)
+    return getattr(obj, field, None)
+
+
+def _parse_litellm_tool_result(response):
+    message = response.choices[0].message
+    tool_calls = _get_litellm_field(message, "tool_calls") or []
+    if not tool_calls:
+        raise RuntimeError("LiteLLM response contained no tool_calls")
+    tool_call = tool_calls[0]
+    function = _get_litellm_field(tool_call, "function") or {}
+    arguments = _get_litellm_field(function, "arguments")
+    if isinstance(arguments, str):
+        return json.loads(arguments)
+    if isinstance(arguments, dict):
+        return arguments
+    raise RuntimeError("LiteLLM tool call contained no arguments")
 
 
 def topological_waves(agents):
@@ -699,6 +756,8 @@ def main():
     print("[ORCHESTRATOR] Decomposing task...\n")
     if provider == "openai":
         result = call_orchestrator_openai(orchestrator_model, task)
+    elif provider == "litellm":
+        result = call_orchestrator_litellm(orchestrator_model, task)
     else:
         result = call_orchestrator_anthropic(orchestrator_model, task)
 
@@ -759,6 +818,8 @@ def main():
                 print(f"\n[ORCHESTRATOR] Assigning {len(report['errors'])} error(s) to agents...")
                 if provider == "openai":
                     assignments = call_assign_fixes_openai(orchestrator_model, report, agents)
+                elif provider == "litellm":
+                    assignments = call_assign_fixes_litellm(orchestrator_model, report, agents)
                 else:
                     assignments = call_assign_fixes_anthropic(orchestrator_model, report, agents)
 

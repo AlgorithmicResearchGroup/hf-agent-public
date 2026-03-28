@@ -49,3 +49,15 @@ def anthropic_to_openai(anthropic_function_call):
         },
     }
     return openai_function_call
+
+
+def ensure_litellm_env():
+    """Map existing repo env vars to the names LiteLLM expects."""
+    env_aliases = {
+        "OPENAI": "OPENAI_API_KEY",
+        "ANTHROPIC": "ANTHROPIC_API_KEY",
+    }
+    for source_name, target_name in env_aliases.items():
+        source_value = os.getenv(source_name)
+        if source_value and not os.getenv(target_name):
+            os.environ[target_name] = source_value

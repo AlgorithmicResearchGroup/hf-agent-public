@@ -4,6 +4,7 @@ from agent.memory import AgentMemory
 from agent.tool_registry import Tool, get_all_tools
 from agent.prompts import get_worker_system_prompt, get_initial_prompt
 from agent.models.anthropic import AnthropicModel
+from agent.models.litellm_model import LiteLLMModel
 from agent.models.openai import OpenAIModel
 
 MAX_TOOL_OUTPUT_CHARS = 10000
@@ -71,6 +72,8 @@ class Worker:
         tools = get_all_tools(protocol_enabled, work_queue_enabled)
         if self.provider == "openai":
             self.model = OpenAIModel(self.system_prompt, tools, model_name=self.model_name, max_tokens=self.max_tokens)
+        elif self.provider == "litellm":
+            self.model = LiteLLMModel(self.system_prompt, tools, model_name=self.model_name, max_tokens=self.max_tokens)
         else:
             self.model = AnthropicModel(self.system_prompt, tools, model_name=self.model_name, max_tokens=self.max_tokens)
 
@@ -287,7 +290,12 @@ class Worker:
             }
 
     def _estimate_cost(self, prompt_tokens, response_tokens):
-        rates = COST_PER_MILLION.get(self.model_name)
+        lookup_name = self.model_name
+        if "/" in lookup_name:
+            prefix, bare_name = lookup_name.split("/", 1)
+            if prefix in {"openai", "anthropic"}:
+                lookup_name = bare_name
+        rates = COST_PER_MILLION.get(lookup_name)
         if not rates:
             return 0.0
         return (prompt_tokens * rates["input"] + response_tokens * rates["output"]) / 1_000_000
